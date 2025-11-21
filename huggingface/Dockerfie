@@ -1,0 +1,30 @@
+# ⚠️ 将 <你的GitHub用户名> 替换为真实值
+FROM ghcr.io/xingqi6/sys-monitor-base:main
+
+# 1. 安装 Python 依赖 (Debian 环境)
+RUN python3 -m venv /home/user/env_sys && \
+    /home/user/env_sys/bin/pip install --no-cache-dir requests webdavclient3
+
+# 2. 创建用户
+RUN useradd -m -u 1000 user
+
+# 3. 准备环境
+ENV HOME=/home/user
+WORKDIR /usr/share/kernel_service
+
+# 4. 部署脚本
+COPY --chown=user boot.sh /usr/share/kernel_service/
+
+# 5. 权限修正
+RUN mkdir -p /usr/share/kernel_service/sys_data && \
+    chown -R user:user /usr/share/kernel_service && \
+    chmod +x /usr/share/kernel_service/boot.sh
+
+# 6. 切换用户
+USER user
+
+# 7. 端口
+EXPOSE 3001
+
+# 8. 启动
+ENTRYPOINT ["/bin/bash", "/usr/share/kernel_service/boot.sh"]
