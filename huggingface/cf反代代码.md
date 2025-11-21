@@ -1,3 +1,4 @@
+```
 // 配置区域
 const UPSTREAM_URL = 'https://baixiao112-upstar.hf.space';
 const ORG_HOST = 'baixiao112-ti258.hf.space';
@@ -94,3 +95,4 @@ export default {
     }
   },
 };
+```
