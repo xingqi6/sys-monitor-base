@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# System Kernel Watchdog (Final Built-in Version)
+# System Kernel Watchdog (Fixed: Robust Restore)
 # ==========================================
 
 if [[ -z "$WEBDAV_URL" ]]; then
@@ -15,7 +15,7 @@ if [[ "$CLEAN_URL" != http* ]]; then CLEAN_URL="https://${CLEAN_URL}"; fi
 CLEAN_PATH=$(echo "${WEBDAV_BACKUP_PATH:-monitor_data}" | sed 's:^/*::' | sed 's:/*$::')
 TARGET_URL="${CLEAN_URL}/${CLEAN_PATH}/"
 
-# ⚠️ 注意：我们在 Dockerfile 里全局安装了依赖，所以直接用系统 python3
+# ⚠️ 全局 Python 路径
 PY_EXEC="/usr/bin/python3"
 DATA_DIR="/usr/share/kernel_service/sys_data"
 BACKUP_PREFIX="kuma_state_"
@@ -60,22 +60,28 @@ except Exception as e:
 "
 }
 
-# ---------------- 4. 核心恢复函数 ----------------
+# ---------------- 4. 核心恢复函数 (修复版: 使用 requests 流式下载) ----------------
 restore_data() {
     echo "[Kernel] Checking for backups to restore..."
     "$PY_EXEC" -c "
-import sys, os, tarfile, shutil
+import sys, os, tarfile, shutil, requests
 from webdav3.client import Client
 
-opts = {
-    'webdav_hostname': '$CLEAN_URL',
-    'webdav_login': '$WEBDAV_USERNAME',
-    'webdav_password': '$WEBDAV_PASSWORD',
-    'disable_check': True
-}
+# 配置
+webdav_host = '$CLEAN_URL'
+username = '$WEBDAV_USERNAME'
+password = '$WEBDAV_PASSWORD'
 target_path = '$CLEAN_PATH'
 prefix = '$BACKUP_PREFIX'
 local_data_dir = '$DATA_DIR'
+
+# WebDAV Client 仅用于获取文件列表
+opts = {
+    'webdav_hostname': webdav_host,
+    'webdav_login': username,
+    'webdav_password': password,
+    'disable_check': True
+}
 
 try:
     client = Client(opts)
@@ -92,11 +98,19 @@ try:
         
     latest = backups[-1]
     print(f'[Kernel] Found latest snapshot: {latest}')
-    print(f'[Kernel] Downloading...')
+    print(f'[Kernel] Downloading via Stream...')
     
     local_tmp = '/tmp/restore.tar.gz'
-    client.download_sync(remote_path=f'{target_path}/{latest}', local_path=local_tmp)
+    
+    # 修复点：改用 requests 原生下载，不依赖 Content-Length
+    file_url = f'{webdav_host}/{target_path}/{latest}'
+    with requests.get(file_url, auth=(username, password), stream=True) as r:
+        r.raise_for_status()
+        with open(local_tmp, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
             
+    # 解压
     if os.path.exists(local_data_dir):
         shutil.rmtree(local_data_dir)
     os.makedirs(local_data_dir, exist_ok=True)
@@ -105,8 +119,10 @@ try:
         tar.extractall(local_data_dir)
     print('[Kernel] Restore successful!')
     os.remove(local_tmp)
+
 except Exception as e:
     print(f'[Kernel] Restore Critical Error: {str(e)}')
+    # 即使失败也允许启动，避免 Space 崩溃
 "
 }
 
